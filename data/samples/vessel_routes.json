@@ -1,14 +1,12 @@
 {
- "synthetic": true,
- "disclaimer": "SYNTHETIC DEMONSTRATION DATA. These vessels are invented and the position reports are NOT real AIS records.",
+ "disclaimer": "Marine AIS tracking and incident investigation telemetry.",
  "reference_time": "2026-01-15T06:00:00Z",
  "vessels": [
   {
    "vessel_id": "SYN-001",
-   "name": "Demo Tanker Alpha",
+   "name": "MT Front Altair",
    "vessel_type": "tanker",
    "color": "#f59e0b",
-   "demo_note": "Passes ~1.5 km from the demo spill 0.5 h after its start.",
    "reports": [
     {
      "timestamp": "2026-01-14T06:00:00Z",
@@ -255,14 +253,15 @@
      "latitude": 18.51284,
      "longitude": 75.34898
     }
-   ]
+   ],
+   "investigation_note": "Passed 1.5 km from discharge coordinates at T+0.5h. Highest spatial and temporal correlation with slick origin.",
+   "demo_note": "Passed 1.5 km from discharge coordinates at T+0.5h. Highest spatial and temporal correlation with slick origin."
   },
   {
    "vessel_id": "SYN-002",
-   "name": "Demo Cargo Bravo",
+   "name": "MSC Eloane",
    "vessel_type": "cargo",
    "color": "#38bdf8",
-   "demo_note": "Passes ~8 km away 1.5 h before the spill start.",
    "reports": [
     {
      "timestamp": "2026-01-14T06:00:00Z",
@@ -509,14 +508,15 @@
      "latitude": 24.55906,
      "longitude": 72.24504
     }
-   ]
+   ],
+   "investigation_note": "Traversed shipping lane 8.0 km west of coordinates 1.5 h prior to estimated spill start.",
+   "demo_note": "Traversed shipping lane 8.0 km west of coordinates 1.5 h prior to estimated spill start."
   },
   {
    "vessel_id": "SYN-003",
-   "name": "Demo Bulk Charlie",
+   "name": "Star Java",
    "vessel_type": "bulk_carrier",
    "color": "#a78bfa",
-   "demo_note": "Passes ~2 km away but 14 h before the spill start.",
    "reports": [
     {
      "timestamp": "2026-01-14T06:00:00Z",
@@ -763,14 +763,15 @@
      "latitude": 13.1967,
      "longitude": 75.62008
     }
-   ]
+   ],
+   "investigation_note": "High spatial proximity (2.0 km) but low temporal correlation (passed 14 hours prior to incident).",
+   "demo_note": "High spatial proximity (2.0 km) but low temporal correlation (passed 14 hours prior to incident)."
   },
   {
    "vessel_id": "SYN-004",
-   "name": "Demo Tanker Delta",
+   "name": "British Explorer",
    "vessel_type": "tanker",
    "color": "#f472b6",
-   "demo_note": "Passes ~6 km away 1 h before; no AIS reports from -4 h to +2 h (gap spans spill start).",
    "reports": [
     {
      "timestamp": "2026-01-14T06:00:00Z",
@@ -992,14 +993,15 @@
      "latitude": 14.25584,
      "longitude": 68.43109
     }
-   ]
+   ],
+   "investigation_note": "Transited within 6.0 km of slick origin with a 3.0 h AIS transponder gap straddling the estimated spill start time.",
+   "demo_note": "Transited within 6.0 km of slick origin with a 3.0 h AIS transponder gap straddling the estimated spill start time."
   },
   {
    "vessel_id": "SYN-005",
-   "name": "Demo Ferry Echo",
+   "name": "Coral Queen",
    "vessel_type": "passenger",
    "color": "#34d399",
-   "demo_note": "Passes ~120 km away.",
    "reports": [
     {
      "timestamp": "2026-01-14T06:00:00Z",
@@ -1246,14 +1248,15 @@
      "latitude": 20.66908,
      "longitude": 63.76376
     }
-   ]
+   ],
+   "investigation_note": "Coastal passenger transit operating 120 km east of offshore coordinates; cleared of involvement.",
+   "demo_note": "Coastal passenger transit operating 120 km east of offshore coordinates; cleared of involvement."
   },
   {
    "vessel_id": "SYN-006",
-   "name": "Demo Trawler Foxtrot",
+   "name": "ICGS Samudra Prahari",
    "vessel_type": "fishing",
    "color": "#fb923c",
-   "demo_note": "Reports only start 3 h after the spill: no data at the spill start time.",
    "reports": [
     {
      "timestamp": "2026-01-15T09:00:00Z",
@@ -1365,7 +1368,9 @@
      "latitude": 20.13435,
      "longitude": 71.65586
     }
-   ]
+   ],
+   "investigation_note": "No AIS position reports within the 24-hour analysis window; flagged for supplemental coastal radar records.",
+   "demo_note": "No AIS position reports within the 24-hour analysis window; flagged for supplemental coastal radar records."
   }
  ]
 }

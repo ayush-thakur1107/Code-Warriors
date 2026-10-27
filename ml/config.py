@@ -21,6 +21,8 @@ STRESS_CSV = DATA_RAW_DIR / "synthetic_stress_extrapolation.csv"
 
 VESSEL_ROUTES_JSON = DATA_SAMPLES_DIR / "vessel_routes.json"
 SPILL_SCENARIO_JSON = DATA_SAMPLES_DIR / "spill_scenario.json"
+SHIPPING_NETWORK_JSON = DATA_SAMPLES_DIR / "shipping_network.json"
+VESSEL_TRAFFIC_JSON = DATA_SAMPLES_DIR / "vessel_traffic.json"
 
 DEFAULT_MODEL_PATH = MODELS_DIR / "area_model.joblib"
 DEFAULT_METADATA_PATH = MODELS_DIR / "area_model_metadata.json"

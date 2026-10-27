@@ -39,7 +39,7 @@ Response: `predicted_area_km2`, `initial_area_km2`, `growth_factor`, `inputs` (e
 {
   "spill": {"latitude": 18.5, "longitude": 70.0, "start_time": "2026-01-15T06:00:00Z"},
   "vessels": [
-    {"vessel_id": "SYN-001", "name": "Demo Tanker Alpha", "vessel_type": "tanker",
+    {"vessel_id": "SYN-001", "name": "MT Front Altair", "vessel_type": "tanker",
      "reports": [{"timestamp": "2026-01-15T05:00:00Z", "latitude": 18.5, "longitude": 69.7}]}
   ],
   "params": {"lookback_hours": 24, "lookahead_hours": 1, "distance_scale_km": 10,
