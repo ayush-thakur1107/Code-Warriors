@@ -20,8 +20,10 @@ from fastapi.responses import JSONResponse
 
 from .model_service import ModelUnavailable, ml_config, model_service
 from .ranking import rank_vessels
-from .gemma_service import generate_explanation
+from .gemma_service import generate_explanation, chat_with_gemma_or_gemini
 from .schemas import (
+    ChatRequest,
+    ChatResponse,
     ExplainRequest,
     ExplainResponse,
     HealthResponse,
@@ -185,6 +187,24 @@ def explain_incident(req: ExplainRequest) -> ExplainResponse:
 
     return ExplainResponse(
         explanation=explanation,
+        model_used=model_used,
+        generated_at=datetime.now(timezone.utc),
+    )
+
+
+@app.post("/chat", response_model=ChatResponse, tags=["investigation"])
+def chat_endpoint(req: ChatRequest) -> ChatResponse:
+    """Conversational maritime intelligence assistant powered by Gemma / Gemini."""
+    reply, model_used = chat_with_gemma_or_gemini(
+        message=req.message,
+        spill=req.spill,
+        prediction=req.prediction,
+        ranking=req.ranking,
+        selected_vessel=req.selected_vessel,
+        api_key=req.api_key,
+    )
+    return ChatResponse(
+        reply=reply,
         model_used=model_used,
         generated_at=datetime.now(timezone.utc),
     )

@@ -6,6 +6,7 @@ export default function NavigationSidebar({
   onResetScenario,
   isPanelOpen,
   setIsPanelOpen,
+  onToggleAiChat,
 }) {
   return (
     <aside className="mt-sidebar" aria-label="Marine Operations Navigation">
@@ -61,6 +62,16 @@ export default function NavigationSidebar({
           <span className="mt-nav-icon">🚢</span>
           <span className="mt-nav-label">Vessel Leads</span>
           <span className="mt-count-pill">{vesselCount}</span>
+        </button>
+
+        <button
+          className="mt-nav-item"
+          onClick={onToggleAiChat}
+          title="Open Gemma / Gemini AI Maritime Copilot"
+        >
+          <span className="mt-nav-icon">🤖</span>
+          <span className="mt-nav-label">AI Copilot</span>
+          <span className="mt-badge" style={{ background: '#0284c7', color: '#fff' }}>GEMMA</span>
         </button>
 
         <div className="mt-nav-divider" />

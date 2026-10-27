@@ -8,6 +8,7 @@ import VesselDetailDrawer from './components/VesselDetailDrawer.jsx'
 import SpillInvestigationDrawer from './components/SpillInvestigationDrawer.jsx'
 import MapView from './components/MapView.jsx'
 import TimelineBar from './components/TimelineBar.jsx'
+import GemmaChatbot from './components/GemmaChatbot.jsx'
 import { MODEL_RANGES } from './config.js'
 import { useApiCall } from './hooks/useApiCall.js'
 import { useBackendStatus } from './hooks/useBackendStatus.js'
@@ -58,6 +59,7 @@ export default function App() {
   const [showRangeRings, setShowRangeRings] = useState(false)
   const [showGrid, setShowGrid] = useState(false)
   const [showCorridors, setShowCorridors] = useState(true)
+  const [isAiChatOpen, setIsAiChatOpen] = useState(false)
 
   // Spill Simulation state
   const [spill, setSpill] = useState(defaultSpill)
@@ -225,6 +227,7 @@ export default function App() {
         onResetScenario={loadSample}
         isPanelOpen={isPanelOpen}
         setIsPanelOpen={setIsPanelOpen}
+        onToggleAiChat={() => setIsAiChatOpen((prev) => !prev)}
       />
 
       {/* 2. Docked Left Operations Intelligence Panel */}
@@ -342,6 +345,19 @@ export default function App() {
             }
           }}
           spill={spill}
+        />
+
+        {/* 4. AI Maritime Intelligence Copilot (Gemma & Gemini Hybrid) */}
+        <GemmaChatbot
+          isOpen={isAiChatOpen}
+          onToggle={() => setIsAiChatOpen((prev) => !prev)}
+          spill={spill}
+          params={params}
+          area={area}
+          ranking={effectiveRanking}
+          vessels={allVessels}
+          selectedVessel={selectedVessel}
+          selectedLead={selectedLead}
         />
       </main>
     </div>

@@ -238,3 +238,26 @@ class ExplainResponse(BaseModel):
     generated_at: datetime
     is_synthetic_data: bool = True
     disclaimer: str = DISCLAIMER
+
+
+# --------------------------------------------------------------------------- chat
+class ChatRequest(BaseModel):
+    """Input for conversational AI Maritime Copilot."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    message: str = Field(..., description="User question or prompt.")
+    spill: dict | None = Field(None, description="Active spill incident state.")
+    prediction: dict | None = Field(None, description="Active spill extent prediction.")
+    ranking: dict | None = Field(None, description="Ranked suspect vessels list.")
+    selected_vessel: dict | None = Field(None, description="Currently selected vessel details if any.")
+    api_key: str | None = Field(None, description="Optional Google Gemini API key.")
+
+
+class ChatResponse(BaseModel):
+    """Reply from Gemma/Gemini Maritime Copilot."""
+
+    reply: str = Field(..., description="AI response text.")
+    model_used: str = Field(..., description="Model identifier: gemini, gemma-ollama, or gemma-maritime-kernel.")
+    generated_at: datetime
+    disclaimer: str = DISCLAIMER

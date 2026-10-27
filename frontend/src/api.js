@@ -64,3 +64,11 @@ export const buildRankRequest = ({ latitude, longitude, startTime, vessels }) =>
 })
 export const rankVessels = (args, signal) =>
   request('/rank-vessels', { method: 'POST', body: buildRankRequest(args), signal })
+
+// POST /chat (Gemma / Gemini Maritime Copilot)
+export const chatWithAi = (payload, signal) =>
+  request('/chat', { method: 'POST', body: payload, signal })
+
+// POST /explain-incident
+export const explainIncident = (payload, signal) =>
+  request('/explain-incident', { method: 'POST', body: payload, signal })
