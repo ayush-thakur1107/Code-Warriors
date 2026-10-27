@@ -31,12 +31,22 @@ export function bearingDeg(lat1, lon1, lat2, lon2) {
 }
 
 // ---- vessel tracks -------------------------------------------------------------------------
+const VESSEL_REGISTRY_METADATA = {
+  'SYN-001': { flag: '🇱🇷', mmsi: 636019241, imo: 9428516, destination: 'IN BOM (Mumbai Port)', speedKnots: 14.2, draught: '12.4 m' },
+  'SYN-002': { flag: '🇵🇦', mmsi: 352002489, imo: 9381024, destination: 'AE JEA (Jebel Ali)', speedKnots: 16.8, draught: '11.0 m' },
+  'SYN-003': { flag: '🇲🇭', mmsi: 538007123, imo: 9601429, destination: 'SG SIN (Singapore)', speedKnots: 11.5, draught: '13.2 m' },
+  'SYN-004': { flag: '🇬🇧', mmsi: 235089124, imo: 9518820, destination: 'IN KAN (Kandla)', speedKnots: 13.9, draught: '10.8 m' },
+  'SYN-005': { flag: '🇮🇳', mmsi: 419001882, imo: 9210945, destination: 'IN GOA (Mormugao)', speedKnots: 18.0, draught: '5.2 m' },
+  'SYN-006': { flag: '🇮🇳', mmsi: 419000101, imo: 9112233, destination: 'COAST GUARD PATROL', speedKnots: 22.4, draught: '3.8 m' },
+}
+
 // Pre-parse timestamps once so the per-frame lookup is cheap.
 export function prepareVessel(v) {
   const fixes = v.reports
     .map((r) => ({ t: Date.parse(r.timestamp), lat: r.latitude, lon: r.longitude }))
     .sort((a, b) => a.t - b.t)
-  return { ...v, fixes }
+  const meta = VESSEL_REGISTRY_METADATA[v.vessel_id] || { flag: '🚩', mmsi: 235000000, imo: 9000000, destination: 'HIGH SEAS', speedKnots: 12.0, draught: '8.0 m' }
+  return { ...v, ...meta, fixes }
 }
 
 // Position at time tMs: { lat, lon, bearing, state } where state is 'active' | 'gap' | 'ended'

@@ -2,7 +2,7 @@
 
 > **Read this first.** All data below is SYNTHETIC and comes from one invented generator (`ml/generate_data.py`). These metrics show how well the model reproduces that synthetic process. They do **not** establish accuracy on real oil spills. No real observations, satellite imagery or AIS records were used.
 
-_Generated 2026-10-27 02:54 UTC by `ml/evaluate.py` · model trained 2026-10-27T02:54:04+00:00 · scikit-learn 1.9.1. Re-running training can change numbers slightly across library versions._
+_Generated 2026-10-27 06:25 UTC by `ml/evaluate.py` · model trained 2026-10-27T06:25:17+00:00 · scikit-learn 1.9.1. Re-running training can change numbers slightly across library versions._
 
 ## Setup
 

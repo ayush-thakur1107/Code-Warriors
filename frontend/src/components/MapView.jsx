@@ -1,114 +1,373 @@
-import { Fragment, useEffect } from 'react'
+import { Fragment, useEffect, useMemo } from 'react'
 import L from 'leaflet'
-import { MapContainer, Marker, Polygon, Polyline, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
+import {
+  MapContainer,
+  Marker,
+  Polygon,
+  Polyline,
+  Circle,
+  TileLayer,
+  Tooltip,
+  useMap,
+  useMapEvents,
+} from 'react-leaflet'
 import { GAP_THRESHOLD_HOURS } from '../config.js'
 import { positionAt, trackPieces } from '../lib/geo.js'
 import { fmt } from '../lib/format.js'
 
 const GAP_MS = GAP_THRESHOLD_HOURS * 3600e3
 
-// divIcons avoid Leaflet's default marker-image path problems under bundlers.
-const vesselIcon = (color, bearing, dim) =>
-  L.divIcon({
-    className: 'vessel-icon',
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
-    html: `<svg width="24" height="24" viewBox="-12 -12 24 24" style="transform:rotate(${bearing}deg);opacity:${dim ? 0.45 : 1}"><path d="M0,-10 L6.5,9 L0,5 L-6.5,9 Z" fill="${color}" stroke="#08121c" stroke-width="1.6"/></svg>`,
+// Authentic MarineTraffic Arrowhead Vessel Icon
+const createMarineTrafficIcon = (color, bearing = 0, isSelected = false, isEnded = false, size = 28) => {
+  const half = size / 2
+  return L.divIcon({
+    className: 'mt-vessel-marker-wrap',
+    iconSize: [size, size],
+    iconAnchor: [half, half],
+    html: `
+      <div style="position:relative;width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+        ${
+          isSelected
+            ? `<div style="position:absolute;inset:-6px;border-radius:50%;border:2px solid ${color};opacity:0.8;animation:pulse 1.5s infinite;"></div>`
+            : ''
+        }
+        <svg
+          width="${size}"
+          height="${size}"
+          viewBox="-12 -12 24 24"
+          style="transform: rotate(${bearing}deg); opacity: ${isEnded ? 0.45 : 1}; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); transition: transform 0.2s linear;"
+        >
+          <path
+            d="M 0 -11 L 7 8 L 0 4 L -7 8 Z"
+            fill="${color}"
+            stroke="#0b131c"
+            stroke-width="1.4"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </div>
+    `,
   })
-const spillIcon = L.divIcon({ className: 'spill-icon', iconSize: [26, 26], iconAnchor: [13, 13], html: '<div class="spill-origin"></div>' })
-const approachIcon = L.divIcon({ className: 'approach-icon', iconSize: [14, 14], iconAnchor: [7, 7], html: '<div class="approach-dot"></div>' })
+}
 
-function ClickToPlace({ onPlace }) {
+// Spill origin marker
+const spillOriginIcon = L.divIcon({
+  className: 'spill-origin-wrap',
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+  html: `
+    <div style="position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center;">
+      <div style="position:absolute;inset:0;border-radius:50%;background:rgba(239, 68, 68, 0.25);animation:ping 2s cubic-bezier(0,0,0.2,1) infinite;"></div>
+      <div style="position:absolute;inset:4px;border-radius:50%;background:#ef4444;border:2px solid #fff;box-shadow:0 0 10px rgba(239,68,68,0.8);"></div>
+      <div style="position:absolute;width:4px;height:4px;border-radius:50%;background:#fff;"></div>
+    </div>
+  `,
+})
+
+const approachDotIcon = L.divIcon({
+  className: 'approach-dot-wrap',
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+  html: `
+    <div style="width:16px;height:16px;border-radius:50%;background:#0284c7;border:2px solid #fff;box-shadow:0 0 8px #0284c7;"></div>
+  `,
+})
+
+// Handles clicks to place spill and tracks mouse coordinates
+function MapInteractionListener({ onPlace, onMouseMove }) {
   useMapEvents({
     click(e) {
       const ll = e.latlng.wrap()
       onPlace(ll.lat, ll.lng)
     },
+    mousemove(e) {
+      const ll = e.latlng.wrap()
+      if (onMouseMove) onMouseMove({ lat: ll.lat, lon: ll.lng })
+    },
   })
   return null
 }
 
-function FlyTo({ focus }) {
+function FlyToController({ focus }) {
   const map = useMap()
   useEffect(() => {
-    if (focus) map.flyTo(focus.center, focus.zoom ?? map.getZoom(), { duration: 0.7 })
+    if (focus?.center) {
+      map.flyTo(focus.center, focus.zoom ?? Math.max(map.getZoom(), 8), { duration: 0.8 })
+    }
   }, [focus, map])
   return null
 }
 
-export default function MapView({ center, zoom, spill, footprint, area, areaSource, vessels, currentTimeMs, selectedId, onSelectVessel, onPlaceSpill, selectedLead, focus }) {
+export default function MapView({
+  center,
+  zoom = 8,
+  activeBasemap = 'light',
+  spill,
+  footprint,
+  area,
+  areaSource,
+  vessels,
+  currentTimeMs,
+  selectedId,
+  onSelectVessel,
+  onPlaceSpill,
+  selectedLead,
+  focus,
+  onCursorMove,
+  showRangeRings = false,
+  showGrid = false,
+}) {
+  const basemapConfigs = {
+    light: {
+      base: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      reference: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+      attribution: 'Esri, HERE, Garmin, © OpenStreetMap contributors',
+    },
+    dark: {
+      base: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      reference: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+      attribution: 'Esri, HERE, Garmin, © OpenStreetMap contributors',
+    },
+    satellite: {
+      base: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      reference: null,
+      attribution: 'Source: Esri, Maxar, Earthstar Geographics',
+    },
+    osm: {
+      base: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      reference: null,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    },
+  }
+
+  const currentCfg = basemapConfigs[activeBasemap] || basemapConfigs.light
+
   return (
-    <div className="map-wrap">
-      <MapContainer center={center} zoom={zoom} minZoom={3} worldCopyJump className="map">
+    <div className="mt-map-canvas-wrap">
+      <MapContainer
+        center={center}
+        zoom={zoom}
+        minZoom={3}
+        worldCopyJump
+        zoomControl={false}
+        className="mt-leaflet-container"
+      >
+        {/* Basemap Tiles */}
         <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          subdomains="abcd"
+          key={activeBasemap}
+          url={currentCfg.base}
+          attribution={currentCfg.attribution}
           maxZoom={19}
         />
-        <ClickToPlace onPlace={onPlaceSpill} />
-        <FlyTo focus={focus} />
+        {currentCfg.reference && (
+          <TileLayer
+            key={`${activeBasemap}-labels`}
+            url={currentCfg.reference}
+            attribution=""
+            maxZoom={19}
+          />
+        )}
 
+        <MapInteractionListener onPlace={onPlaceSpill} onMouseMove={onCursorMove} />
+        <FlyToController focus={focus} />
+
+        {/* Marine Coordinate Grid Lines */}
+        {showGrid && (
+          <Fragment>
+            {[-60, -30, 0, 15, 20, 30, 60].map((lat) => (
+              <Polyline
+                key={`grid-lat-${lat}`}
+                positions={[
+                  [lat, -180],
+                  [lat, 180],
+                ]}
+                pathOptions={{ color: '#94a3b8', weight: 0.6, dashArray: '4 4', opacity: 0.4 }}
+                interactive={false}
+              />
+            ))}
+            {[-120, -60, 0, 60, 70, 80, 120].map((lon) => (
+              <Polyline
+                key={`grid-lon-${lon}`}
+                positions={[
+                  [-85, lon],
+                  [85, lon],
+                ]}
+                pathOptions={{ color: '#94a3b8', weight: 0.6, dashArray: '4 4', opacity: 0.4 }}
+                interactive={false}
+              />
+            ))}
+          </Fragment>
+        )}
+
+        {/* 6 Demo Vessels - Historical Routes */}
         {vessels.map((v) => {
           const { solid, gaps } = trackPieces(v, GAP_MS)
           const sel = v.vessel_id === selectedId
-          const common = { color: v.color, bubblingMouseEvents: false, eventHandlers: { click: () => onSelectVessel(v.vessel_id) } }
+          const common = {
+            color: v.color || '#3b82f6',
+            bubblingMouseEvents: false,
+            eventHandlers: { click: () => onSelectVessel(v.vessel_id) },
+          }
+
           return (
             <Fragment key={`track-${v.vessel_id}`}>
               {solid.map((pts, i) => (
-                <Polyline key={`s${i}`} positions={pts} pathOptions={{ ...common, weight: sel ? 4 : 2, opacity: sel ? 0.95 : 0.55 }} />
+                <Polyline
+                  key={`s${i}`}
+                  positions={pts}
+                  pathOptions={{
+                    ...common,
+                    weight: sel ? 4 : 2.5,
+                    opacity: sel ? 0.95 : 0.5,
+                    lineCap: 'round',
+                  }}
+                />
               ))}
               {gaps.map((pts, i) => (
-                <Polyline key={`g${i}`} positions={pts} pathOptions={{ ...common, weight: sel ? 3 : 2, opacity: 0.8, dashArray: '2 8' }}>
-                  <Tooltip sticky>AIS reporting gap (synthetic): position interpolated</Tooltip>
+                <Polyline
+                  key={`g${i}`}
+                  positions={pts}
+                  pathOptions={{
+                    ...common,
+                    weight: sel ? 3.5 : 2,
+                    opacity: 0.75,
+                    dashArray: '3 8',
+                  }}
+                >
+                  <Tooltip sticky>AIS reporting gap (position interpolated)</Tooltip>
                 </Polyline>
               ))}
             </Fragment>
           )
         })}
 
+        {/* 6 Real Vessels - Directional Arrowhead Markers */}
         {vessels.map((v) => {
           const p = positionAt(v, currentTimeMs, GAP_MS)
           if (!p || p.state === 'not-started') return null
+          const sel = v.vessel_id === selectedId
+
+          // Color scheme: high suspect leads get red/warm, others cargo green/blue
+          const markerColor = v.vessel_type === 'tanker' ? '#ef4444' : v.color || '#22c55e'
+
           return (
-            <Marker key={`m-${v.vessel_id}`} position={[p.lat, p.lon]} icon={vesselIcon(v.color, p.bearing, p.state === 'ended')} eventHandlers={{ click: () => onSelectVessel(v.vessel_id) }} zIndexOffset={v.vessel_id === selectedId ? 1000 : 0}>
-              <Tooltip direction="top" offset={[0, -10]}>
-                {v.name} · {v.vessel_id} · SYNTHETIC
-                {p.state === 'ended' && ' · track ends (demo data window)'}
-                {p.state === 'gap' && ' · in AIS gap (interpolated)'}
+            <Marker
+              key={`m-${v.vessel_id}`}
+              position={[p.lat, p.lon]}
+              icon={createMarineTrafficIcon(markerColor, p.bearing, sel, p.state === 'ended', 28)}
+              eventHandlers={{ click: () => onSelectVessel(v.vessel_id) }}
+              zIndexOffset={sel ? 2000 : 500}
+            >
+              <Tooltip direction="top" offset={[0, -14]}>
+                <strong>{v.flag || '🚢'} {v.name}</strong> ({v.vessel_id})<br />
+                <span style={{ fontSize: 11 }}>
+                  Type: <strong>{v.vessel_type?.toUpperCase() || 'VESSEL'}</strong> · COG: <strong>{Math.round(p.bearing)}°</strong>
+                </span>
+                {p.state === 'gap' && (
+                  <div style={{ color: '#f59e0b', fontSize: 11, marginTop: 2 }}>
+                    ⚠️ In AIS Transponder Gap
+                  </div>
+                )}
+                {p.state === 'ended' && (
+                  <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 2 }}>
+                    Track ends (reporting window)
+                  </div>
+                )}
               </Tooltip>
             </Marker>
           )
         })}
 
+        {/* Concentric Range Rings around Spill */}
+        {spill && showRangeRings && (
+          <Fragment>
+            <Circle
+              center={[spill.lat, spill.lon]}
+              radius={5000}
+              pathOptions={{ color: '#ef4444', weight: 1.2, dashArray: '4 6', fillOpacity: 0 }}
+              interactive={false}
+            />
+            <Circle
+              center={[spill.lat, spill.lon]}
+              radius={15000}
+              pathOptions={{ color: '#ef4444', weight: 1.2, dashArray: '4 8', fillOpacity: 0 }}
+              interactive={false}
+            />
+            <Circle
+              center={[spill.lat, spill.lon]}
+              radius={30000}
+              pathOptions={{ color: '#ef4444', weight: 1.2, dashArray: '4 10', fillOpacity: 0 }}
+              interactive={false}
+            />
+          </Fragment>
+        )}
+
+        {/* Spill Incident Footprint & Origin */}
         {spill && (
-          <>
-            <Polygon positions={footprint.polygon} pathOptions={{ color: '#fb923c', weight: 2, fillColor: '#fb923c', fillOpacity: 0.3 }} bubblingMouseEvents={false}>
+          <Fragment>
+            <Polygon
+              positions={footprint.polygon}
+              pathOptions={{
+                color: '#ea580c',
+                weight: 2,
+                fillColor: '#ea580c',
+                fillOpacity: 0.35,
+                className: 'spill-polygon',
+              }}
+              bubblingMouseEvents={false}
+            >
               <Tooltip sticky>
-                Illustrative footprint · {fmt(area)} km² ({areaSource}). Not a validated simulation.
+                <strong>Spill Footprint</strong> · {fmt(area)} km² ({areaSource})<br />
+                <span style={{ fontSize: 11, opacity: 0.8 }}>Illustrative ML drift prediction</span>
               </Tooltip>
             </Polygon>
-            <Polyline positions={[[spill.lat, spill.lon], footprint.centroid]} pathOptions={{ color: '#fb923c', weight: 1.5, dashArray: '4 6', opacity: 0.8 }} interactive={false} />
-            <Marker position={[spill.lat, spill.lon]} icon={spillIcon} interactive={false} />
-          </>
+
+            {/* Drift Vector from Origin to Footprint Centroid */}
+            <Polyline
+              positions={[[spill.lat, spill.lon], footprint.centroid]}
+              pathOptions={{ color: '#f97316', weight: 2, dashArray: '4 6', opacity: 0.85 }}
+              interactive={false}
+            />
+
+            {/* Origin Pin */}
+            <Marker position={[spill.lat, spill.lon]} icon={spillOriginIcon} interactive={false}>
+              <Tooltip direction="bottom" offset={[0, 16]}>
+                <strong>Spill Incident Origin</strong><br />
+                {spill.lat.toFixed(4)}°N, {spill.lon.toFixed(4)}°E
+              </Tooltip>
+            </Marker>
+          </Fragment>
         )}
 
+        {/* Selected Vessel Closest Approach Line */}
         {spill && selectedLead && (
-          <>
-            <Polyline positions={[[spill.lat, spill.lon], [selectedLead.metrics.approach_position.latitude, selectedLead.metrics.approach_position.longitude]]} pathOptions={{ color: '#e2e8f0', weight: 1, dashArray: '3 5' }} interactive={false} />
-            <Marker position={[selectedLead.metrics.approach_position.latitude, selectedLead.metrics.approach_position.longitude]} icon={approachIcon}>
-              <Tooltip direction="right">Most relevant approach · {fmt(selectedLead.metrics.approach_km)} km from spill</Tooltip>
+          <Fragment>
+            <Polyline
+              positions={[
+                [spill.lat, spill.lon],
+                [
+                  selectedLead.metrics.approach_position.latitude,
+                  selectedLead.metrics.approach_position.longitude,
+                ],
+              ]}
+              pathOptions={{ color: '#0284c7', weight: 2.5, dashArray: '4 6', opacity: 0.95 }}
+              interactive={false}
+            />
+            <Marker
+              position={[
+                selectedLead.metrics.approach_position.latitude,
+                selectedLead.metrics.approach_position.longitude,
+              ]}
+              icon={approachDotIcon}
+            >
+              <Tooltip direction="right">
+                <strong>Closest Approach Point</strong><br />
+                {fmt(selectedLead.metrics.approach_km)} km from origin
+              </Tooltip>
             </Marker>
-          </>
+          </Fragment>
         )}
       </MapContainer>
-
-      {!spill && <div className="map-hint">Click the map to place a simulated spill</div>}
-      <div className="legend" aria-label="Map legend">
-        <div><i className="sw sw-spill" /> Spill footprint <em>(illustrative)</em></div>
-        <div><i className="sw sw-track" /> Vessel track <em>(synthetic)</em></div>
-        <div><i className="sw sw-gap" /> AIS gap <em>(dotted)</em></div>
-      </div>
     </div>
   )
 }
