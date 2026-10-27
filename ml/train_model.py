@@ -1,14 +1,48 @@
 """Train the spill-area model on the SYNTHETIC training CSV and save it.
 
     python ml/train_model.py
+    python ml/train_model.py --include-real       # also uses data/real/*.csv if present
+    python ml/train_model.py --skip-eval          # skip test/stress evaluation
+    python ml/train_model.py --skip-compare       # skip model comparison, use GBR only
 
-Steps: load train CSV -> grouped cross-validation -> fit final model -> check on the
-validation set -> save artifact -> evaluate on test + stress sets and write the report.
+Steps:
+  1. Load training CSV (synthetic, and optionally real-labelled data).
+  2. Validate columns and check for leakage.
+  3. Compare GradientBoostingRegressor, HistGradientBoostingRegressor, RandomForestRegressor
+     using grouped 5-fold CV on the TRAINING set.
+  4. Select the best candidate by cross-validation MAE.
+  5. Refit the winner on the full training data.
+  6. Evaluate on the validation set.
+  7. Save the model artifact and metadata.
+  8. Evaluate on test + stress sets and write the evaluation report.
 
-Why GradientBoostingRegressor? It handles non-linear interactions (spreading vs. wind
-vs. time) on small tabular data, needs no feature scaling and works well with default-ish
-settings. Fewer decisions for a beginner. Its limitation: it cannot extrapolate beyond the
-training range.
+Why we compare models
+---------------------
+The original pipeline used a single fixed model.  Comparing alternatives guards
+against accidentally using a suboptimal algorithm as real data arrives.  Selection
+is performed on validation data ONLY — the test set is never seen during selection.
+
+Model comparison notes
+----------------------
+* GradientBoostingRegressor (GBR)     — original choice; good on small tabular data.
+* HistGradientBoostingRegressor (HGB) — faster GBR variant; natively handles NaN.
+* RandomForestRegressor (RF)          — high variance, lower bias; useful as check.
+
+If GBR still wins, nothing changes in the saved artifact.
+
+Real data support
+-----------------
+If ``--include-real`` is set and ``data/real/*.csv`` files exist, they are
+loaded with explicit ``data_source="real"`` provenance and concatenated with the
+synthetic training data.  Synthetic and real rows are never mixed silently:
+the metadata records how many rows of each type were used.
+Use ``ml/ingest.py`` to validate external CSVs before training.
+
+Feature contract
+----------------
+FEATURE_COLUMNS, TARGET_COLUMN and GENERATOR_RANGES are the single source of
+truth in ``ml/features.py``.  Do NOT change the feature list here — change it
+there and retrain.
 """
 from __future__ import annotations
 
@@ -17,19 +51,24 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import joblib  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
-import sklearn  # noqa: E402
-from sklearn.ensemble import GradientBoostingRegressor  # noqa: E402
+import joblib           # noqa: E402
+import numpy as np      # noqa: E402
+import pandas as pd     # noqa: E402
+import sklearn          # noqa: E402
+from sklearn.ensemble import (  # noqa: E402
+    GradientBoostingRegressor,
+    HistGradientBoostingRegressor,
+    RandomForestRegressor,
+)
 from sklearn.model_selection import GroupKFold, cross_val_predict  # noqa: E402
 
-from ml import config  # noqa: E402
+from ml import config                                               # noqa: E402
 from ml.evaluate import compute_metrics, print_summary, run_evaluation  # noqa: E402
-from ml.features import (  # noqa: E402
+from ml.features import (                                           # noqa: E402
     FEATURE_COLUMNS,
     GENERATOR_RANGES,
     GROUP_COLUMN,
@@ -39,18 +78,43 @@ from ml.features import (  # noqa: E402
 from ml.predict import AreaPredictor  # noqa: E402
 
 SEED = 42
-HYPERPARAMETERS = {
-    "n_estimators": 400,
-    "learning_rate": 0.05,
-    "max_depth": 4,
-    "subsample": 0.8,
-    "random_state": SEED,
+
+# ---------------------------------------------------------------------------
+# Candidate models — each must implement .fit(X, y) and .predict(X)
+# ---------------------------------------------------------------------------
+CANDIDATE_MODELS: dict[str, Any] = {
+    "GradientBoostingRegressor": GradientBoostingRegressor(
+        n_estimators=400,
+        learning_rate=0.05,
+        max_depth=4,
+        subsample=0.8,
+        random_state=SEED,
+    ),
+    "HistGradientBoostingRegressor": HistGradientBoostingRegressor(
+        max_iter=400,
+        learning_rate=0.05,
+        max_depth=4,
+        random_state=SEED,
+    ),
+    "RandomForestRegressor": RandomForestRegressor(
+        n_estimators=400,
+        max_depth=12,
+        min_samples_leaf=3,
+        random_state=SEED,
+        n_jobs=-1,
+    ),
 }
-DATA_SOURCE = (
+
+DATA_SOURCE_SYNTHETIC = (
     "SYNTHETIC: generated by ml/generate_data.py from an invented formula. "
     "Not real spill observations."
 )
+REAL_DATA_DIR = config.ROOT / "data" / "real"
 
+
+# ---------------------------------------------------------------------------
+# Data loading
+# ---------------------------------------------------------------------------
 
 def _load(path: Path, name: str) -> pd.DataFrame:
     if not path.exists():
@@ -62,60 +126,186 @@ def _load(path: Path, name: str) -> pd.DataFrame:
     return df
 
 
+def _load_real_data() -> pd.DataFrame | None:
+    """Load all CSV files from data/real/ if they exist.  Returns None if none found."""
+    if not REAL_DATA_DIR.exists():
+        return None
+    real_csvs = list(REAL_DATA_DIR.glob("*.csv"))
+    if not real_csvs:
+        return None
+
+    frames: list[pd.DataFrame] = []
+    for csv in real_csvs:
+        try:
+            df = pd.read_csv(csv)
+            validate_dataset_columns(df, f"real/{csv.name}")
+            df = df[list(FEATURE_COLUMNS) + [TARGET_COLUMN, GROUP_COLUMN]]
+            # Prefix scenario IDs so they cannot accidentally collide with synthetic IDs
+            df[GROUP_COLUMN] = "real-" + df[GROUP_COLUMN].astype(str)
+            frames.append(df)
+            print(f"  [real data] Loaded {len(df)} rows from {csv.name}")
+        except Exception as exc:
+            print(f"  [real data] WARNING: skipping {csv.name}: {exc}")
+
+    if not frames:
+        return None
+    combined = pd.concat(frames, ignore_index=True)
+    print(f"  [real data] Total real rows: {len(combined)}")
+    return combined
+
+
 def _training_range(name: str, values: pd.Series) -> list[float]:
-    """Range used for extrapolation warnings: the range the generator was configured to
-    sample from, widened if the data happens to exceed it. (Using the raw observed min/max
-    would wrongly warn on legitimate edge values such as wind = 20 m/s.)"""
-    lo_decl, hi_decl = GENERATOR_RANGES[name]
+    """Feature range for extrapolation warnings.  Widens if data exceeds declared range."""
+    lo_decl, hi_decl = GENERATOR_RANGES.get(name, (float(values.min()), float(values.max())))
     return [min(lo_decl, float(values.min())), max(hi_decl, float(values.max()))]
 
+
+# ---------------------------------------------------------------------------
+# Model comparison
+# ---------------------------------------------------------------------------
+
+def _compare_models(
+    X: pd.DataFrame,
+    y: pd.Series,
+    groups: pd.Series,
+    n_splits: int = 5,
+) -> dict[str, dict[str, float]]:
+    """Grouped CV on training data.  Returns {model_name: metrics_dict}."""
+    cv = GroupKFold(n_splits=n_splits)
+    results: dict[str, dict[str, float]] = {}
+    for name, estimator in CANDIDATE_MODELS.items():
+        preds = cross_val_predict(estimator, X, y, groups=groups, cv=cv)
+        results[name] = compute_metrics(y.to_numpy(), preds)
+        print(
+            f"  CV [{name:40s}]  MAE={results[name]['MAE_km2']:.3f}  "
+            f"RMSE={results[name]['RMSE_km2']:.3f}  R2={results[name]['R2']:.3f}"
+        )
+    return results
+
+
+def _select_best(cv_results: dict[str, dict[str, float]]) -> str:
+    """Pick the model with the lowest CV MAE."""
+    best = min(cv_results, key=lambda n: cv_results[n]["MAE_km2"])
+    print(f"\n  Winner (lowest CV MAE): {best}")
+    return best
+
+
+# ---------------------------------------------------------------------------
+# Main training function
+# ---------------------------------------------------------------------------
 
 def train(
     train_csv: Path = config.TRAIN_CSV,
     val_csv: Path = config.VAL_CSV,
     model_path: Path = config.DEFAULT_MODEL_PATH,
     metadata_path: Path = config.DEFAULT_METADATA_PATH,
+    include_real: bool = False,
+    skip_compare: bool = False,
 ) -> dict:
+    """Full training pipeline. Returns the saved bundle dict."""
+
+    # ── 1. Load data ────────────────────────────────────────────────────────
     train_df = _load(train_csv, "train")
     val_df = _load(val_csv, "validation")
 
-    overlap = set(train_df[GROUP_COLUMN]) & set(val_df[GROUP_COLUMN])
-    if overlap:
-        raise SystemExit(f"ERROR: {len(overlap)} scenario ids appear in both train and validation (leakage).")
+    real_df: pd.DataFrame | None = None
+    if include_real:
+        real_df = _load_real_data()
+        if real_df is not None:
+            # Leakage check: real scenario IDs must not overlap with synthetic val/test
+            real_ids = set(real_df[GROUP_COLUMN])
+            val_ids = set(val_df[GROUP_COLUMN])
+            overlap = real_ids & val_ids
+            if overlap:
+                print(
+                    f"  [real data] WARNING: {len(overlap)} real scenario ID(s) also appear in "
+                    "validation. Dropping those from real training data to prevent leakage."
+                )
+                real_df = real_df[~real_df[GROUP_COLUMN].isin(val_ids)]
 
-    X, y = train_df[list(FEATURE_COLUMNS)], train_df[TARGET_COLUMN]
+    # ── 2. Leakage check ────────────────────────────────────────────────────
+    overlap_syn = set(train_df[GROUP_COLUMN]) & set(val_df[GROUP_COLUMN])
+    if overlap_syn:
+        raise SystemExit(
+            f"ERROR: {len(overlap_syn)} scenario ids appear in both train and validation (leakage)."
+        )
 
-    # Grouped CV: all rows of one scenario stay together in a fold.
-    cv_pred = cross_val_predict(
-        GradientBoostingRegressor(**HYPERPARAMETERS),
-        X,
-        y,
-        groups=train_df[GROUP_COLUMN],
-        cv=GroupKFold(n_splits=5),
-    )
-    cv_metrics = compute_metrics(y.to_numpy(), cv_pred)
+    # ── 3. Combine training data ─────────────────────────────────────────────
+    training_frames = [train_df]
+    real_row_count = 0
+    synthetic_row_count = len(train_df)
+    data_source = DATA_SOURCE_SYNTHETIC
 
-    model = GradientBoostingRegressor(**HYPERPARAMETERS).fit(X, y)
+    if real_df is not None and len(real_df):
+        training_frames.append(real_df)
+        real_row_count = len(real_df)
+        data_source = (
+            f"Mixed: {synthetic_row_count} SYNTHETIC rows (ml/generate_data.py) "
+            f"+ {real_row_count} REAL labelled rows (data/real/). "
+            "Provenance tracked separately in metadata."
+        )
+        print(
+            f"\n  Training on {synthetic_row_count} synthetic + {real_row_count} real rows."
+        )
+    else:
+        if include_real:
+            print("  No real data found in data/real/ -- training on synthetic only.")
 
+    combined_train = pd.concat(training_frames, ignore_index=True)
+    X = combined_train[list(FEATURE_COLUMNS)]
+    y = combined_train[TARGET_COLUMN]
+    groups = combined_train[GROUP_COLUMN]
+
+    # -- 4. Model comparison or single-model grouped CV -----------------------
+    print("\n--- Grouped cross-validation on training data ---")
+    if skip_compare:
+        # Only evaluate GBR (original behaviour)
+        name = "GradientBoostingRegressor"
+        preds = cross_val_predict(
+            CANDIDATE_MODELS[name], X, y, groups=groups, cv=GroupKFold(n_splits=5)
+        )
+        cv_results = {name: compute_metrics(y.to_numpy(), preds)}
+        winner_name = name
+    else:
+        cv_results = _compare_models(X, y, groups)
+        winner_name = _select_best(cv_results)
+
+    winner_estimator = CANDIDATE_MODELS[winner_name]
+    cv_metrics = cv_results[winner_name]
+
+    # -- 5. Fit final model on full training data ------------------------------
+    print(f"\n--- Fitting final model ({winner_name}) on all training data ---")
+    model = type(winner_estimator)(**winner_estimator.get_params()).fit(X, y)
+
+    # -- 6. Validate on held-out validation set -------------------------------
     val_pred = model.predict(val_df[list(FEATURE_COLUMNS)])
     val_metrics = compute_metrics(val_df[TARGET_COLUMN].to_numpy(), val_pred)
+    print(
+        f"  Validation: MAE={val_metrics['MAE_km2']:.3f} km2  "
+        f"RMSE={val_metrics['RMSE_km2']:.3f} km2  R2={val_metrics['R2']:.3f}"
+    )
 
+    # -- 7. Build and save bundle ---------------------------------------------
     feature_ranges = {c: _training_range(c, X[c]) for c in FEATURE_COLUMNS}
     bundle = {
-        "schema_version": 1,
+        "schema_version": 2,                          # bumped from 1 for model-comparison support
         "model": model,
-        "model_name": "GradientBoostingRegressor",
+        "model_name": winner_name,
         "feature_columns": list(FEATURE_COLUMNS),
         "target_column": TARGET_COLUMN,
         "feature_ranges": feature_ranges,
         "trained_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "sklearn_version": sklearn.__version__,
         "numpy_version": np.__version__,
-        "training_rows": int(len(train_df)),
-        "training_scenarios": int(train_df[GROUP_COLUMN].nunique()),
-        "hyperparameters": HYPERPARAMETERS,
-        "data_source": DATA_SOURCE,
-        "grouped_cv_metrics": cv_metrics,
+        "training_rows": int(len(combined_train)),
+        "training_rows_synthetic": synthetic_row_count,
+        "training_rows_real": real_row_count,
+        "training_scenarios": int(combined_train[GROUP_COLUMN].nunique()),
+        "hyperparameters": winner_estimator.get_params(),
+        "data_source": data_source,
+        "model_comparison_cv": cv_results,        # all candidates' CV results
+        "winner_selection_metric": "CV MAE (km2)",
+        "winner_cv_metrics": cv_metrics,
         "validation_metrics": val_metrics,
     }
 
@@ -127,25 +317,53 @@ def train(
     return bundle
 
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train the OCEANTRACE synthetic area model.")
-    parser.add_argument("--skip-eval", action="store_true", help="do not evaluate on test/stress sets")
+    parser = argparse.ArgumentParser(description="Train the OCEANTRACE spill-area model.")
+    parser.add_argument(
+        "--include-real",
+        action="store_true",
+        help="Also load validated real-labelled CSVs from data/real/ (requires ml/ingest.py first).",
+    )
+    parser.add_argument(
+        "--skip-eval",
+        action="store_true",
+        help="Do not evaluate on test/stress sets or write the report.",
+    )
+    parser.add_argument(
+        "--skip-compare",
+        action="store_true",
+        help="Skip model comparison; use GradientBoostingRegressor only (faster, original behaviour).",
+    )
     args = parser.parse_args()
 
-    bundle = train()
-    print(f"Saved model    -> {config.DEFAULT_MODEL_PATH.relative_to(config.ROOT)}")
-    print(f"Saved metadata -> {config.DEFAULT_METADATA_PATH.relative_to(config.ROOT)}")
-    print(f"Training rows: {bundle['training_rows']} ({bundle['training_scenarios']} scenarios)")
-    cv, val = bundle["grouped_cv_metrics"], bundle["validation_metrics"]
-    print(f"Grouped 5-fold CV on train : MAE={cv['MAE_km2']:.3f} km2  RMSE={cv['RMSE_km2']:.3f} km2")
-    print(f"Validation set             : MAE={val['MAE_km2']:.3f} km2  RMSE={val['RMSE_km2']:.3f} km2")
+    bundle = train(include_real=args.include_real, skip_compare=args.skip_compare)
+
+    rel_model = config.DEFAULT_MODEL_PATH.relative_to(config.ROOT)
+    rel_meta = config.DEFAULT_METADATA_PATH.relative_to(config.ROOT)
+    print(f"\nSaved model    -> {rel_model}")
+    print(f"Saved metadata -> {rel_meta}")
+    print(f"Training rows  : {bundle['training_rows']} ({bundle['training_scenarios']} scenarios)")
+    if bundle["training_rows_real"]:
+        print(
+            f"   + {bundle['training_rows_synthetic']} synthetic  "
+            f"+ {bundle['training_rows_real']} real-labelled"
+        )
+    cv, val = bundle["winner_cv_metrics"], bundle["validation_metrics"]
+    print(f"Winner model   : {bundle['model_name']}")
+    print(f"CV on train    : MAE={cv['MAE_km2']:.3f} km2  RMSE={cv['RMSE_km2']:.3f} km2")
+    print(f"Validation set : MAE={val['MAE_km2']:.3f} km2  RMSE={val['RMSE_km2']:.3f} km2")
 
     if not args.skip_eval:
         predictor = AreaPredictor.load(config.DEFAULT_MODEL_PATH)
         results = run_evaluation(predictor, write_report=True)
         print_summary(results)
         print(f"\nReport written to {config.EVALUATION_REPORT_PATH.relative_to(config.ROOT)}")
-    print("\nREMINDER: metrics describe the SYNTHETIC generator only, not real oil-spill accuracy.")
+
+    print("\nREMINDER: metrics describe the SYNTHETIC generator only -- not real oil-spill accuracy.")
 
 
 if __name__ == "__main__":
