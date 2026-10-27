@@ -1,0 +1,39 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node / frontend build
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Secrets & local config (never commit API keys)
+.env
+.env.*
+!.env.example
+*.key
+
+# Trained model artifacts: reproducible with `python ml/train_model.py`.
+# (Pickled models also break across scikit-learn versions, so teammates retrain locally.)
+models/*.joblib
+models/*.pkl
+models/*.json
+!models/README.md
+
+# Large / raw external data (this repo only ships small synthetic samples)
+data/external/
+data/large/
+*.parquet
+*.nc
+*.tif
+*.tiff
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.zip
