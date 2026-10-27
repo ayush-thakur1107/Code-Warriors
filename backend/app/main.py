@@ -20,7 +20,10 @@ from fastapi.responses import JSONResponse
 
 from .model_service import ModelUnavailable, ml_config, model_service
 from .ranking import rank_vessels
+from .gemma_service import generate_explanation
 from .schemas import (
+    ExplainRequest,
+    ExplainResponse,
     HealthResponse,
     ModelInfo,
     PredictAreaRequest,
@@ -153,3 +156,35 @@ def rank_vessels_endpoint(req: RankVesselsRequest) -> RankVesselsResponse | JSON
     else:
         vessels = req.vessels or []
     return rank_vessels(vessels, req.spill, req.params, used_sample=used_sample)
+
+
+@app.post("/explain-incident", response_model=ExplainResponse, tags=["investigation"])
+def explain_incident(req: ExplainRequest) -> ExplainResponse:
+    """Generate a plain-English investigation summary for a synthetic spill incident.
+
+    Combines the spill location, optional footprint prediction, and optional vessel
+    ranking into a readable report. Uses a local Gemma model via Ollama when available;
+    falls back to a deterministic template that needs no API key or GPU.
+
+    Vessels are always described as investigative leads, never culprits.
+    All output is labelled as synthetic / prototype data.
+    """
+    from datetime import datetime, timezone
+
+    spill_dict = req.spill.model_dump(mode="json")
+    pred_dict = req.prediction.model_dump(mode="json") if req.prediction else None
+    rank_dict = req.ranking.model_dump(mode="json") if req.ranking else None
+
+    explanation, model_used = generate_explanation(
+        spill=spill_dict,
+        prediction=pred_dict,
+        ranking=rank_dict,
+        max_vessels=req.max_vessels,
+        use_ollama=req.use_ollama,
+    )
+
+    return ExplainResponse(
+        explanation=explanation,
+        model_used=model_used,
+        generated_at=datetime.now(timezone.utc),
+    )
