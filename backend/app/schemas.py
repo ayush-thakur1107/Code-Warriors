@@ -194,3 +194,47 @@ class RankVesselsResponse(BaseModel):
     unassessed: list[UnassessedVessel]
     used_sample_vessels: bool
     disclaimer: str = DISCLAIMER
+
+
+# ------------------------------------------------------------------ explain-incident
+class ExplainRequest(BaseModel):
+    """Input for POST /explain-incident.
+
+    Pass the spill, and optionally the outputs of /predict-area and /rank-vessels.
+    All fields are optional except spill so the frontend can call this at any stage.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    spill: SpillIncident
+    prediction: PredictAreaResponse | None = Field(
+        None,
+        description="Response from POST /predict-area. Include for a richer summary.",
+    )
+    ranking: RankVesselsResponse | None = Field(
+        None,
+        description="Response from POST /rank-vessels. Include for vessel lead commentary.",
+    )
+    max_vessels: int = Field(
+        3,
+        ge=1,
+        le=10,
+        description="How many top-ranked vessels to mention in the explanation.",
+    )
+    use_ollama: bool = Field(
+        True,
+        description="If True, attempt a local Ollama/Gemma model before the template fallback.",
+    )
+
+
+class ExplainResponse(BaseModel):
+    """Plain-English incident summary produced by the explanation service."""
+
+    explanation: str = Field(..., description="Markdown-formatted investigation summary.")
+    model_used: str = Field(
+        ...,
+        description="Which generator produced the text: 'gemma-ollama (<model>)' or 'template'.",
+    )
+    generated_at: datetime
+    is_synthetic_data: bool = True
+    disclaimer: str = DISCLAIMER
