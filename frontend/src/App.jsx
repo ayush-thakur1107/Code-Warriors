@@ -57,6 +57,7 @@ export default function App() {
   const [showPlayback, setShowPlayback] = useState(true)
   const [showRangeRings, setShowRangeRings] = useState(false)
   const [showGrid, setShowGrid] = useState(false)
+  const [showCorridors, setShowCorridors] = useState(true)
 
   // Spill Simulation state
   const [spill, setSpill] = useState(defaultSpill)
@@ -283,6 +284,7 @@ export default function App() {
           onCursorMove={(coords) => setCursorCoords(coords)}
           showRangeRings={showRangeRings}
           showGrid={showGrid}
+          showCorridors={showCorridors}
         />
 
         {/* Right Floating Map Toolbar */}
@@ -293,6 +295,8 @@ export default function App() {
           setShowRangeRings={setShowRangeRings}
           showGrid={showGrid}
           setShowGrid={setShowGrid}
+          showCorridors={showCorridors}
+          setShowCorridors={setShowCorridors}
           onCenterSpill={centerOnSpill}
           onZoomIn={() => setFocus((prev) => ({ ...prev, zoom: Math.min(18, (prev?.zoom || 8) + 1) }))}
           onZoomOut={() => setFocus((prev) => ({ ...prev, zoom: Math.max(3, (prev?.zoom || 8) - 1) }))}

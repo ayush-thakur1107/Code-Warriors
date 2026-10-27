@@ -14,6 +14,20 @@ import {
 import { GAP_THRESHOLD_HOURS } from '../config.js'
 import { positionAt, trackPieces } from '../lib/geo.js'
 import { fmt } from '../lib/format.js'
+import shippingNetwork from '@data/shipping_network.json'
+
+// Seaport Anchor Marker Icon
+const portIcon = (port) =>
+  L.divIcon({
+    className: 'mt-port-marker-wrap',
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    html: `
+      <div style="width:22px;height:22px;border-radius:50%;background:#0f172a;border:2px solid #38bdf8;display:flex;align-items:center;justify-content:center;box-shadow:0 0 6px rgba(56,189,248,0.4);font-size:11px;cursor:pointer;">
+        ⚓
+      </div>
+    `,
+  })
 
 const GAP_MS = GAP_THRESHOLD_HOURS * 3600e3
 
@@ -117,7 +131,22 @@ export default function MapView({
   onCursorMove,
   showRangeRings = false,
   showGrid = false,
+  showCorridors = true,
 }) {
+  const shippingCorridors = useMemo(() => {
+    if (!shippingNetwork?.routes || !shippingNetwork?.ports) return []
+    const portsById = Object.fromEntries(
+      shippingNetwork.ports.map((p) => [p.id, [p.latitude, p.longitude]]),
+    )
+    return shippingNetwork.routes
+      .map((r, i) => {
+        const p1 = portsById[r.from]
+        const p2 = portsById[r.to]
+        if (!p1 || !p2) return null
+        return { id: `corridor-${i}`, points: [p1, ...(r.waypoints || []), p2] }
+      })
+      .filter(Boolean)
+  }, [])
   const basemapConfigs = {
     light: {
       base: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
@@ -171,6 +200,46 @@ export default function MapView({
 
         <MapInteractionListener onPlace={onPlaceSpill} onMouseMove={onCursorMove} />
         <FlyToController focus={focus} />
+
+        {/* International Shipping Corridors & Fairways */}
+        {showCorridors &&
+          shippingCorridors.map((c) => (
+            <Polyline
+              key={c.id}
+              positions={c.points}
+              pathOptions={{
+                color: '#64748b',
+                weight: 1.5,
+                dashArray: '3 7',
+                opacity: 0.4,
+                lineCap: 'round',
+              }}
+              interactive={false}
+            />
+          ))}
+
+        {/* International Seaports */}
+        {showCorridors &&
+          shippingNetwork?.ports?.map((p) => (
+            <Marker
+              key={`port-${p.id}`}
+              position={[p.latitude, p.longitude]}
+              icon={portIcon(p)}
+              zIndexOffset={300}
+            >
+              <Tooltip direction="top" offset={[0, -10]}>
+                <div style={{ minWidth: 120, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                  <div style={{ fontWeight: 700, fontSize: 12, color: '#f8fafc' }}>
+                    ⚓ Port of {p.name} ({p.id})
+                  </div>
+                  <div style={{ fontSize: 11, color: '#94a3b8' }}>{p.country}</div>
+                  <div style={{ fontSize: 10, color: '#38bdf8', marginTop: 2 }}>
+                    {p.latitude.toFixed(2)}°N, {p.longitude.toFixed(2)}°E
+                  </div>
+                </div>
+              </Tooltip>
+            </Marker>
+          ))}
 
         {/* Marine Coordinate Grid Lines */}
         {showGrid && (

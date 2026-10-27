@@ -7,6 +7,8 @@ export default function MapToolbar({
   setShowRangeRings,
   showGrid,
   setShowGrid,
+  showCorridors = true,
+  setShowCorridors,
   onCenterSpill,
   onZoomIn,
   onZoomOut,
@@ -90,6 +92,17 @@ export default function MapToolbar({
           <rect x="3" y="14" width="7" height="7" />
         </svg>
       </button>
+
+      {/* Shipping Corridors & Seaports toggle */}
+      {setShowCorridors && (
+        <button
+          className={`mt-tool-btn ${showCorridors ? 'active' : ''}`}
+          onClick={() => setShowCorridors(!showCorridors)}
+          title="Toggle Shipping Corridors & Ports"
+        >
+          <span style={{ fontSize: 14 }}>⚓</span>
+        </button>
+      )}
 
       {/* Re-center on Spill site */}
       <button
