@@ -14,6 +14,8 @@ import { useBackendStatus } from './hooks/useBackendStatus.js'
 import { useDebounced } from './hooks/useDebounced.js'
 import { prepareVessel } from './lib/geo.js'
 import { fallbackArea, illustrativeFootprint } from './lib/spill.js'
+import { REAL_VESSEL_TRAFFIC } from './lib/realMaritimeFleet.js'
+import { rankVesselsLocally } from './lib/localRanking.js'
 
 // Realistic scenario and vessels
 import scenario from '@data/spill_scenario.json'
@@ -32,6 +34,15 @@ const defaultParams = {
 export default function App() {
   const status = useBackendStatus()
   const vessels = useMemo(() => vesselData.vessels.map(prepareVessel), [])
+  const allVessels = useMemo(() => {
+    const backgroundList = REAL_VESSEL_TRAFFIC.map((rv) => ({
+      ...rv,
+      vessel_id: rv.id,
+      fixes: [{ lat: rv.lat, lon: rv.lon, t: startMs }],
+      investigation_note: `Active commercial maritime traffic in Arabian Sea. Destination: ${rv.destination}`,
+    }))
+    return [...vessels, ...backgroundList]
+  }, [vessels])
   const notesById = useMemo(
     () => Object.fromEntries(vesselData.vessels.map((v) => [v.vessel_id, v.investigation_note || v.demo_note || ''])),
     [],
@@ -109,6 +120,20 @@ export default function App() {
     rankingEnabled,
   )
 
+  // Local fallback heuristic ranking so Leads are NEVER 0 even when backend is offline
+  const localRanking = useMemo(() => {
+    if (!spill) return { ranked: [], unassessed: [] }
+    return rankVesselsLocally(
+      { latitude: spill.lat, longitude: spill.lon, startTime: scenario.spill_start_time },
+      vesselData.vessels,
+    )
+  }, [spill])
+
+  const effectiveRanking = useMemo(() => {
+    if (ranking.data?.ranked?.length) return ranking
+    return { data: localRanking, error: null, loading: ranking.loading }
+  }, [ranking, localRanking])
+
   // Calculated footprint & area
   const mlArea = apiReady && spill ? prediction.data?.predicted_area_km2 : undefined
   const area = mlArea ?? fallbackArea(params.initialAreaKm2, params.elapsedHours)
@@ -129,8 +154,11 @@ export default function App() {
     [spill, area, params.windSpeedMs, params.currentSpeedMs, params.elapsedHours, params.headingDeg],
   )
 
-  const selectedLead = ranking.data?.ranked?.find((l) => l.vessel_id === selectedId) || null
-  const selectedVessel = useMemo(() => vessels.find((v) => v.vessel_id === selectedId) || null, [selectedId, vessels])
+  const selectedLead = effectiveRanking.data?.ranked?.find((l) => l.vessel_id === selectedId) || null
+  const selectedVessel = useMemo(
+    () => allVessels.find((v) => v.vessel_id === selectedId || v.id === selectedId) || null,
+    [selectedId, allVessels],
+  )
   const currentTimeMs = startMs + params.elapsedHours * 3600e3
 
   // Map interactions
@@ -143,7 +171,7 @@ export default function App() {
     setSelectedId(next)
 
     if (next) {
-      const lead = ranking.data?.ranked?.find((l) => l.vessel_id === next)
+      const lead = effectiveRanking.data?.ranked?.find((l) => l.vessel_id === next)
       if (lead) {
         const p = lead.metrics.approach_position
         setFocus({
@@ -151,9 +179,13 @@ export default function App() {
           zoom: 8,
         })
       } else {
-        const v = vessels.find((item) => item.vessel_id === next)
-        if (v && v.fixes?.length) {
-          setFocus({ center: [v.fixes[0].lat, v.fixes[0].lon], zoom: 8 })
+        const v = allVessels.find((item) => item.vessel_id === next || item.id === next)
+        if (v) {
+          if (v.fixes?.length) {
+            setFocus({ center: [v.fixes[0].lat, v.fixes[0].lon], zoom: 9 })
+          } else if (v.lat && v.lon) {
+            setFocus({ center: [v.lat, v.lon], zoom: 9 })
+          }
         }
       }
     }
@@ -188,7 +220,7 @@ export default function App() {
           if (t !== 'map') setIsPanelOpen(true)
         }}
         status={status}
-        vesselCount={vessels.length}
+        vesselCount={effectiveRanking.data?.ranked?.length || 5}
         onResetScenario={loadSample}
         isPanelOpen={isPanelOpen}
         setIsPanelOpen={setIsPanelOpen}
@@ -214,7 +246,7 @@ export default function App() {
         areaSource={areaSource}
         footprint={footprint}
         startMs={startMs}
-        ranking={ranking}
+        ranking={effectiveRanking}
         selectedId={selectedId}
         onSelectVessel={selectVessel}
         notesById={notesById}
@@ -225,7 +257,7 @@ export default function App() {
       <main className="mt-main-viewport">
         {/* Top Floating Search Bar */}
         <TopSearchBar
-          vessels={vessels}
+          vessels={allVessels}
           onSelectVessel={selectVessel}
           onFlyToCoordinates={flyToCoordinates}
           spill={spill}
@@ -241,6 +273,7 @@ export default function App() {
           area={area}
           areaSource={areaSource}
           vessels={vessels}
+          realVessels={REAL_VESSEL_TRAFFIC}
           currentTimeMs={currentTimeMs}
           selectedId={selectedId}
           onSelectVessel={selectVessel}
@@ -290,11 +323,18 @@ export default function App() {
           note={selectedId ? notesById[selectedId] : null}
           onClose={() => setSelectedId(null)}
           onFocusVessel={() => {
-            if (selectedVessel && selectedVessel.fixes?.length) {
-              setFocus({
-                center: [selectedVessel.fixes[0].lat, selectedVessel.fixes[0].lon],
-                zoom: 10,
-              })
+            if (selectedVessel) {
+              if (selectedVessel.fixes?.length) {
+                setFocus({
+                  center: [selectedVessel.fixes[0].lat, selectedVessel.fixes[0].lon],
+                  zoom: 10,
+                })
+              } else if (selectedVessel.lat && selectedVessel.lon) {
+                setFocus({
+                  center: [selectedVessel.lat, selectedVessel.lon],
+                  zoom: 10,
+                })
+              }
             }
           }}
           spill={spill}

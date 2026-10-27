@@ -107,6 +107,7 @@ export default function MapView({
   area,
   areaSource,
   vessels,
+  realVessels = [],
   currentTimeMs,
   selectedId,
   onSelectVessel,
@@ -273,6 +274,39 @@ export default function MapView({
                     Track ends (reporting window)
                   </div>
                 )}
+              </Tooltip>
+            </Marker>
+          )
+        })}
+
+        {/* Real Maritime AIS Fleet Traffic (Live MarineTraffic vessels in Arabian Sea / Mumbai) */}
+        {realVessels.map((rv) => {
+          const sel = rv.id === selectedId || rv.vessel_id === selectedId
+          const markerColor = rv.color || (rv.vessel_type === 'tanker' ? '#ef4444' : '#22c55e')
+
+          return (
+            <Marker
+              key={`fleet-${rv.id || rv.vessel_id}`}
+              position={[rv.lat, rv.lon]}
+              icon={createMarineTrafficIcon(markerColor, rv.heading || 0, sel, false, sel ? 28 : 22)}
+              eventHandlers={{ click: () => onSelectVessel(rv.id || rv.vessel_id) }}
+              zIndexOffset={sel ? 2500 : 350}
+            >
+              <Tooltip direction="top" offset={[0, -12]}>
+                <div style={{ minWidth: 155, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: '#f8fafc' }}>
+                    {rv.flag || '🚢'} {rv.name}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0' }}>
+                    MMSI: <strong style={{ color: '#cbd5e1' }}>{rv.mmsi}</strong> · IMO: <strong style={{ color: '#cbd5e1' }}>{rv.imo}</strong>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#e2e8f0' }}>
+                    Type: <strong style={{ textTransform: 'capitalize' }}>{rv.vessel_type}</strong> · SOG: <strong>{rv.speedKnots} kn</strong> · COG: <strong>{rv.heading}°</strong>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#38bdf8', marginTop: 2 }}>
+                    Dest: <strong>{rv.destination}</strong>
+                  </div>
+                </div>
               </Tooltip>
             </Marker>
           )

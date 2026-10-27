@@ -5,19 +5,24 @@ export default function TopSearchBar({ vessels, onSelectVessel, onFlyToCoordinat
   const [isOpen, setIsOpen] = useState(false)
   const wrapperRef = useRef(null)
 
-  // Filter vessels based on query
+  // Filter vessels based on query (name, ID, MMSI, IMO, type)
   const suggestions = useMemo(() => {
     if (!query.trim()) return []
     const q = query.toLowerCase().trim()
     return vessels
       .filter((v) => {
+        const vid = (v.vessel_id || v.id || '').toLowerCase()
+        const mmsi = String(v.mmsi || '')
+        const imo = String(v.imo || '')
         return (
           v.name.toLowerCase().includes(q) ||
-          v.vessel_id.toLowerCase().includes(q) ||
+          vid.includes(q) ||
+          mmsi.includes(q) ||
+          imo.includes(q) ||
           v.vessel_type?.toLowerCase().includes(q)
         )
       })
-      .slice(0, 6)
+      .slice(0, 8)
   }, [query, vessels])
 
   // Handle outside click to close dropdown
@@ -48,7 +53,7 @@ export default function TopSearchBar({ vessels, onSelectVessel, onFlyToCoordinat
     }
 
     if (suggestions.length > 0) {
-      onSelectVessel(suggestions[0].vessel_id)
+      onSelectVessel(suggestions[0].vessel_id || suggestions[0].id)
       setIsOpen(false)
     }
   }
@@ -86,24 +91,27 @@ export default function TopSearchBar({ vessels, onSelectVessel, onFlyToCoordinat
       {isOpen && suggestions.length > 0 && (
         <ul className="mt-search-dropdown" role="listbox">
           <li className="mt-dropdown-header">Vessels in Area ({suggestions.length})</li>
-          {suggestions.map((v) => (
-            <li
-              key={v.vessel_id}
-              className="mt-dropdown-item"
-              onClick={() => {
-                onSelectVessel(v.vessel_id)
-                setQuery(v.name)
-                setIsOpen(false)
-              }}
-            >
-              <span className="vessel-badge-indicator" style={{ backgroundColor: v.color || '#3b82f6' }} />
-              <div className="vessel-dropdown-info">
-                <strong>{v.name}</strong>
-                <span>{v.vessel_id} · {v.vessel_type?.toUpperCase() || 'VESSEL'}</span>
-              </div>
-              <span className="vessel-chevron">›</span>
-            </li>
-          ))}
+          {suggestions.map((v) => {
+            const vid = v.vessel_id || v.id
+            return (
+              <li
+                key={vid}
+                className="mt-dropdown-item"
+                onClick={() => {
+                  onSelectVessel(vid)
+                  setQuery(v.name)
+                  setIsOpen(false)
+                }}
+              >
+                <span className="vessel-badge-indicator" style={{ backgroundColor: v.color || '#3b82f6' }} />
+                <div className="vessel-dropdown-info">
+                  <strong>{v.flag || '🚢'} {v.name}</strong>
+                  <span>{vid} · {v.vessel_type?.toUpperCase() || 'VESSEL'}</span>
+                </div>
+                <span className="vessel-chevron">›</span>
+              </li>
+            )
+          })}
           {spill && (
             <li
               className="mt-dropdown-item spill-quick-jump"
